@@ -16,6 +16,8 @@ public class WaveformCollapse : MonoBehaviour
 	[SerializeField]
 	public int OutputSizeY = 32;
 
+	HashSet<int> _consideredStacks = new HashSet<int>();
+
 	public struct Tile
 	{
 		public Color[] Colors;
@@ -69,8 +71,12 @@ public class WaveformCollapse : MonoBehaviour
 
 		// Step 5: Pick random pixel and tile, set it's color
 		Color[] outputColors = new Color[pixelCount];
-		int lowestEntropyStackIndex = Random.Range(0, pixelCount); // Pick random first stack
+		for(int i = 0; i < pixelCount; i++)
+		{
+			outputColors[i] = Color.magenta;
+		}
 
+		int lowestEntropyStackIndex = Random.Range(0, pixelCount); // Pick random first stack
 
 		// Step 6: Collapse the Waveform!
 		bool allStacksResolved = false;
@@ -78,9 +84,14 @@ public class WaveformCollapse : MonoBehaviour
 		{
 			// Pick Random Tile from lowest entropy stack
 			Tile resolvedTile = PickRandomTile(tileStacks, lowestEntropyStackIndex);
-			// TODO: Only remove if there are valid options remaining on all adjacent pixels? 
+			_consideredStacks.Add(lowestEntropyStackIndex);
+
+			// TODO: Only pick tilesif there are valid options remaining on all adjacent pixels? 
 			// Q: This should happen automatically with a valid input set?
-			outputColors[lowestEntropyStackIndex] = resolvedTile.GetColor(1,1); // Is it correct that we're only determining the centre pixel?
+			// Might also be possible to backtrack if all stacks are removed by a choice, however an input validator is probably easier
+
+			outputColors[lowestEntropyStackIndex] = resolvedTile.GetColor(1,1);
+			// TODO: Stamp full tile not just center position
 
 			int x = lowestEntropyStackIndex % OutputSizeX, y = lowestEntropyStackIndex / OutputSizeX;
 			int stackIndex = 0;
@@ -94,36 +105,28 @@ public class WaveformCollapse : MonoBehaviour
 						var stack = tileStacks[stackIndex];
 						for (int index = stack.Count - 1; index >= 0; index--)
 						{
+							// TODO: Check against all resolved output colours
 							if (!stack[index].HasValidOverlap(outputColors[lowestEntropyStackIndex], xOffset - x, yOffset - y))
 							{
-								stack.RemoveAt(index);
+								if (stack.Count > 1)
+								{
+									stack.RemoveAt(index);
+								}
+								else
+								{
+									Debug.LogError("Ran out of valid tiles");
+								}
 							}
 						}
 					}
 				}
 			}
 
-			allStacksResolved = CalculateAreAllStacksResolved(tileStacks);
+			allStacksResolved = _consideredStacks.Count == tileStacks.Length;
 
 			if (!allStacksResolved)
 			{
-				// Get lowest entropy stack
-				List<int> potentialStackIndices = new List<int>();
-				int minimumEntropy = int.MaxValue;
-				for(int i = 0; i < tileStacks.Length; i++)
-				{
-					if (tileStacks[i].Count > 1 && tileStacks[i].Entropy <= minimumEntropy)
-					{
-						if (tileStacks[i].Entropy < minimumEntropy)
-						{
-							potentialStackIndices.Clear();
-							minimumEntropy = tileStacks[i].Entropy;
-						}
-						potentialStackIndices.Add(i);
-					}
-				}
-
-				lowestEntropyStackIndex = potentialStackIndices[Random.Range(0, potentialStackIndices.Count)];
+				lowestEntropyStackIndex = GetLowestEntropyStackIndex(tileStacks);
 			}
 
 			SetOutputTextureColors(outputColors);
@@ -135,6 +138,29 @@ public class WaveformCollapse : MonoBehaviour
 		// Step 7: Render the output
 		SetOutputTextureColors(outputColors);
 		OutputRenderer.material.mainTexture = _outputTexture;
+	}
+
+	private int GetLowestEntropyStackIndex(TileStack[] tileStacks)
+	{
+		int lowestEntropyStackIndex;
+		// Get lowest entropy stack
+		List<int> potentialStackIndices = new List<int>();
+		int minimumEntropy = int.MaxValue;
+		for (int i = 0; i < tileStacks.Length; i++)
+		{
+			if (!_consideredStacks.Contains(i) && tileStacks[i].Entropy <= minimumEntropy)
+			{
+				if (tileStacks[i].Entropy < minimumEntropy)
+				{
+					potentialStackIndices.Clear();
+					minimumEntropy = tileStacks[i].Entropy;
+				}
+				potentialStackIndices.Add(i);
+			}
+		}
+
+		lowestEntropyStackIndex = potentialStackIndices[Random.Range(0, potentialStackIndices.Count)];
+		return lowestEntropyStackIndex;
 	}
 
 	private static Tile PickRandomTile(TileStack[] tileStacks, int stackIndex)
@@ -189,6 +215,7 @@ public class WaveformCollapse : MonoBehaviour
 				tiles.Add(tile);
 			}
 		}
+		// TODO: Remove dupes and have weightings
 		return tiles;
 	}
 
