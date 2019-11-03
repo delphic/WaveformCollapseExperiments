@@ -4,8 +4,8 @@ using UnityEngine;
 
 public class WaveformCollapse : MonoBehaviour
 {
-	const int INPUT_WIDTH = 5;
-	const int INPUT_HEIGHT = 5;
+	const int INPUT_WIDTH = 11;
+	const int INPUT_HEIGHT = 11;
 
 	[SerializeField]
 	public MeshRenderer InputRenderer;
@@ -19,9 +19,21 @@ public class WaveformCollapse : MonoBehaviour
 	public struct Tile
 	{
 		public Color[] Colors;
+		public Color GetColor(int x, int y)
+		{
+			return Colors[x + y * 3];
+		}
+		public bool HasValidOverlap(Color color, int xOffset, int yOffset)
+		{
+			int x = 1 - xOffset, y = 1 - yOffset;
+			return GetColor(x, y) == color;
+		}
 	}
 
-	public class TileStack : List<Tile> { }
+	public class TileStack : List<Tile>
+	{
+		public int Entropy { get { return this.Count; } }
+	}
 
 	List<List<Color>> _input;
 	
@@ -30,11 +42,15 @@ public class WaveformCollapse : MonoBehaviour
 
 	IEnumerator Start()
 	{
+		// Create Input Textures
+		_inputTexture = new Texture2D(INPUT_WIDTH, INPUT_HEIGHT);
+		_outputTexture = new Texture2D(OutputSizeX, OutputSizeY);
+
 		// Step 1: Input Texture 5x5, white outer, black ring, red inner
 		SetInput();
 
 		// Step 2: Render The Input Texture
-		CreateInputTexture();
+		SetInputTextureColors();
 		InputRenderer.material.mainTexture = _inputTexture;
 
 		// Step 3: Profit, create 3x3 tiles
@@ -62,25 +78,63 @@ public class WaveformCollapse : MonoBehaviour
 		{
 			// Pick Random Tile from lowest entropy stack
 			Tile resolvedTile = PickRandomTile(tileStacks, lowestEntropyStackIndex);
-			// TODO: Only remove if there are valid options remaining on all adjacent pixels?
-			outputColors[lowestEntropyStackIndex] = resolvedTile.Colors[4];
+			// TODO: Only remove if there are valid options remaining on all adjacent pixels? 
+			// Q: This should happen automatically with a valid input set?
+			outputColors[lowestEntropyStackIndex] = resolvedTile.GetColor(1,1); // Is it correct that we're only determining the centre pixel?
 
 			int x = lowestEntropyStackIndex % OutputSizeX, y = lowestEntropyStackIndex / OutputSizeX;
 			int stackIndex = 0;
-			if (x - 1 > 0)
+			for(int xOffset = x - 1; xOffset <= x + 1; xOffset++)
 			{
-				if (y - 1 > 0)
+				for(int yOffset = y -1; yOffset <= y + 1; yOffset++)
 				{
-					stackIndex = (x - 1) + (y - 1) * OutputSizeX;
-					// Remove invalid tiles where overlap does not match
-					// TODO: Check there are any function instead
+					if (xOffset >= 0 && yOffset >= 0 && xOffset < OutputSizeX && yOffset < OutputSizeY && !(xOffset == x && yOffset == y))
+					{
+						stackIndex = xOffset + yOffset * OutputSizeX;
+						var stack = tileStacks[stackIndex];
+						for (int index = stack.Count - 1; index >= 0; index--)
+						{
+							if (!stack[index].HasValidOverlap(outputColors[lowestEntropyStackIndex], xOffset - x, yOffset - y))
+							{
+								stack.RemoveAt(index);
+							}
+						}
+					}
 				}
 			}
 
-
 			allStacksResolved = CalculateAreAllStacksResolved(tileStacks);
+
+			if (!allStacksResolved)
+			{
+				// Get lowest entropy stack
+				List<int> potentialStackIndices = new List<int>();
+				int minimumEntropy = int.MaxValue;
+				for(int i = 0; i < tileStacks.Length; i++)
+				{
+					if (tileStacks[i].Count > 1 && tileStacks[i].Entropy <= minimumEntropy)
+					{
+						if (tileStacks[i].Entropy < minimumEntropy)
+						{
+							potentialStackIndices.Clear();
+							minimumEntropy = tileStacks[i].Entropy;
+						}
+						potentialStackIndices.Add(i);
+					}
+				}
+
+				lowestEntropyStackIndex = potentialStackIndices[Random.Range(0, potentialStackIndices.Count)];
+			}
+
+			SetOutputTextureColors(outputColors);
+			OutputRenderer.material.mainTexture = _outputTexture;
+
 			yield return null;
 		}
+
+		// Step 7: Render the output
+		SetOutputTextureColors(outputColors);
+		OutputRenderer.material.mainTexture = _outputTexture;
 	}
 
 	private static Tile PickRandomTile(TileStack[] tileStacks, int stackIndex)
@@ -165,11 +219,12 @@ public class WaveformCollapse : MonoBehaviour
 			var row = new List<Color>();
 			for (int j = 0; j < INPUT_WIDTH; j++)
 			{
-				if (i == 0 || i == 4 || j == 0 || j == 4)
+				if (i == 0 || i == 1 || i == 2 || i == INPUT_WIDTH - 3 || i == INPUT_WIDTH - 2 || i == INPUT_WIDTH - 1
+					|| j == 0 || j == 1 || j == 2 || j == INPUT_WIDTH -3 || j == INPUT_HEIGHT - 2 || j == INPUT_HEIGHT - 1)
 				{
 					row.Add(Color.white);
 				}
-				else if (i == 2 && j == 2)
+				else if (i == INPUT_WIDTH / 2 && j == INPUT_HEIGHT / 2)
 				{
 					row.Add(Color.red);
 				}
@@ -182,9 +237,8 @@ public class WaveformCollapse : MonoBehaviour
 		}
 	}
 
-	private void CreateInputTexture()
+	private void SetInputTextureColors()
 	{
-		_inputTexture = new Texture2D(INPUT_WIDTH, INPUT_HEIGHT);
 		for (int x = 0; x < INPUT_WIDTH; x++)
 		{
 			for (int y = 0; y < INPUT_HEIGHT; y++)
@@ -193,5 +247,14 @@ public class WaveformCollapse : MonoBehaviour
 			}
 		}
 		_inputTexture.Apply();
+	}
+
+	private void SetOutputTextureColors(Color[] colors)
+	{
+		for (int i = 0, l = colors.Length; i < l; i++)
+		{
+			_outputTexture.SetPixel(i % OutputSizeX, i / OutputSizeX, colors[i]);
+		}
+		_outputTexture.Apply();
 	}
 }
